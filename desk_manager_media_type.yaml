@@ -6,16 +6,20 @@ zabbix_export:
       parameters:
         - name: alert_message
           value: '{ALERT.MESSAGE}'
+        - name: alert_sendto
+          value: '{ALERT.SENDTO}'
         - name: alert_subject
           value: '{ALERT.SUBJECT}'
         - name: api_url
           value: 'https://api.desk.ms'
         - name: auto_categoria
-          value: '9420'
+          value: '9481'
         - name: chave_ambiente
           value: 1c6cf26bcec47e0550015059a45d1714fd404ad5
         - name: chave_operador
           value: ee6a24f6f32c2c66ba233d18117b6019209b7339
+        - name: cod_grupo
+          value: '000010'
         - name: email_solicitante
           value: central.monitoramento@ituniverse.com.br
         - name: event_id
@@ -36,20 +40,17 @@ zabbix_export:
           value: '{EVENT.UPDATE.STATUS}'
         - name: event_value
           value: '{EVENT.VALUE}'
-        - name: grupo_transferencia
-          value: '000010'
         - name: solicitacao
           value: '000071'
         - name: solicitante
-          value: '25'
+          value: '98'
         - name: tipo_ocorrencia
-          value: '000002'
-        - name: To
-          value: '{ALERT.SENDTO}'
+          value: '000008'
         - name: trigger_id
           value: '{TRIGGER.ID}'
         - name: zabbix_url
           value: '{$ZABBIX.URL}'
+      attempts: '1'
       script: |
         const CLogger = function(serviceName) {
         	this.serviceName = serviceName;
@@ -470,52 +471,156 @@ zabbix_export:
         		throw 'Authentication failed. HTTP code: ' + this.request.getStatus();
         	}
         	
-        	// O token vem como string simples ou dentro de um objeto
-        	this.api_token = (typeof response === 'string') ? response : response.access_token;
+        	this.api_token = response;
         	Logger.log(Logger.INFO, 'Authentication successful');
         }
         
         DeskManager.prototype.buildDescription = function() {
         	var description = '';
         	
-        	// Construir descrição com base nos dados do alerta
-        	description += 'ALERTA ZABBIX\n';
-        	description += '─────────────────────────────────────\n\n';
-        	
         	if (this.params.alert_subject && this.params.alert_subject !== '') {
-        		description += 'ASSUNTO: ' + this.params.alert_subject + '\n\n';
-        	}
-        	
-        	if (this.params.trigger_name && this.params.trigger_name !== '') {
-        		description += 'TRIGGER: ' + this.params.trigger_name + '\n';
-        	}
-        	
-        	if (this.params.host_name && this.params.host_name !== '') {
-        		description += 'HOST: ' + this.params.host_name + '\n';
+        		description += this.params.alert_subject + '\n';
         	}
         	
         	if (this.params.event_severity && this.params.event_severity !== '') {
         		description += 'SEVERIDADE: ' + this.params.event_severity + '\n';
         	}
         	
-        	if (this.params.event_date && this.params.event_time) {
-        		description += 'DATA/HORA: ' + this.params.event_date + ' ' + this.params.event_time + '\n';
-        	}
-        	
-        	description += '\n─────────────────────────────────────\n';
-        	
         	if (this.params.alert_message && this.params.alert_message !== '') {
-        		description += '\nDETALHES:\n' + this.params.alert_message + '\n';
+        		description += '\n<b>TRIGGER INFORMATION</b>\n' + this.params.alert_message + '\n';
         	}
         	
         	if (this.params.zabbix_url && this.params.trigger_id && this.params.event_id) {
-        		description += '\n─────────────────────────────────────\n';
-        		description += 'LINK DO EVENTO:\n';
+        		description += '\nMais informações em: ';
         		description += this.params.zabbix_url + '/tr_events.php?triggerid=' + 
         		               this.params.trigger_id + '&eventid=' + this.params.event_id;
         	}
         	
         	return description;
+        }
+        
+        DeskManager.prototype.buildInteractionDescription = function() {
+        	var description = '';
+        	
+        	if (this.params.alert_subject && this.params.alert_subject !== '') {
+        		description += this.params.alert_subject + '\n\n\n';
+        	}
+        
+        	if (this.params.alert_message && this.params.alert_message !== '') {
+        		description += this.params.alert_message + '\n';
+        	}
+        
+        	if (this.params.zabbix_url && this.params.trigger_id && this.params.event_id) {
+        		description += 'Mais informações em: ';
+        		description += this.params.zabbix_url + '/tr_events.php?triggerid=' + 
+        		               this.params.trigger_id + '&eventid=' + this.params.event_id;
+        	}
+        	
+        	return description;
+        }
+        
+        DeskManager.prototype.addInteraction = function(ticket_id) {
+        	Logger.log(Logger.INFO, 'Adding interaction to ticket: ' + ticket_id);
+        	
+        	var interaction_description = this.buildInteractionDescription();
+        	var descLower = interaction_description.toLowerCase();
+        
+        	// Procura o nome do operador e devolve o código respectivo
+        	var cod_operador = '';
+        
+        	if (this.params.alert_sendto && this.params.alert_sendto.trim() !== '') {
+        		var usuarios = JSON.parse(this.params.alert_sendto);
+        
+        		for (var usuario in usuarios) {
+        			if (descLower.includes(usuario)) {
+        				cod_operador = usuarios[usuario];
+        				Logger.log(Logger.INFO, 'CodOperador set to: ' + cod_operador);
+        			}
+        		}
+        	}
+        
+        	// Acknowledge = Pausa, senão em atendimento
+        	if (interaction_description.includes("Reconhecido: No")) {
+        		cod_status = '000006'
+        	} else {
+        		cod_status = '000020'
+        	}
+        
+        	// Gerar data e hora automaticamente
+        	var now = new Date();
+        	var horaInicial = new Date(now.getTime() - 2 * 60 * 1000);
+        	var horaFinal = new Date(now);
+        
+        	function formatDate(d) {
+        		var day = ('0' + d.getDate()).slice(-2);
+        		var month = ('0' + (d.getMonth() + 1)).slice(-2);
+        		var year = d.getFullYear();
+        		return day + '-' + month + '-' + year;
+        	}
+        
+        	function formatTime(d) {
+        		var h = ('0' + d.getHours()).slice(-2);
+        		var m = ('0' + d.getMinutes()).slice(-2);
+        		var s = ('0' + d.getSeconds()).slice(-2);
+        		return h + ':' + m + ':' + s;
+        	}
+        	
+        	// Construir payload da interação
+        	var interaction_data = {
+        		'Chave': ticket_id,
+        		'TChamado': {
+        			'CodFormaAtendimento': '000004',
+        			'CodStatus': cod_status,
+        			'Descricao': interaction_description,
+        			'EnviarEmail': 'N',
+        			'EnvBase': 'N',
+        			'DataInteracao': formatDate(now),
+        			'HoraInicial': formatTime(horaInicial),
+        			'HoraFinal': formatTime(horaFinal),
+        			'PrimeiroAtendimento': 'N',
+        			'SegundoAtendimento': 'N',
+        			"CodGrupo": this.params.cod_grupo,
+        			'CodOperador': cod_operador
+        		}
+        	};
+        	
+        	Logger.log(Logger.INFO, 'Interaction data: ' + JSON.stringify(interaction_data));
+        	
+        	// Enviar interação
+        	this.request.clearHeader();
+        	this.request.addHeaders('Authorization: ' + this.api_token);
+        	
+        	var response = this.request.jsonRequest('PUT', 'https://api.desk.ms/ChamadosSuporte/interagir', interaction_data);
+        	
+        	if (this.request.getStatus() !== 200) {
+        		Logger.log(Logger.WARN, 'HTTP code: ' + this.request.getStatus());
+        		Logger.log(Logger.WARN, 'Response: ' + JSON.stringify(response));
+        		
+        		if (CParamValidator.isDefined(response.erro)) {
+        			throw 'Desk Manager API error on interaction: ' + response.erro;
+        		}
+        		else {
+        			throw 'Failed to add interaction. HTTP code: ' + this.request.getStatus();
+        		}
+        	}
+        	
+        	// Verificar se há erro na resposta
+        	if (CParamValidator.isDefined(response.erro)) {
+        		throw 'Desk Manager API error on interaction: ' + response.erro;
+        	}
+        	
+        	var interaction_id = (typeof response === 'string') ? response : (response.Chave || response.interaction_id);
+        	Logger.log(Logger.INFO, 'Interaction added successfully. ID: ' + interaction_id);
+        	
+        	return interaction_id;
+        }
+        
+        DeskManager.prototype.getTicketID = function() {
+        	const tag_key = '__desk_ticket_id';
+        	if (CParamValidator.isDefined(this.params.event_tags) && CParamValidator.isDefined(this.params.event_tags[tag_key])) {
+        		return this.params.event_tags[tag_key];
+        	}
+        	return null;
         }
         
         DeskManager.prototype.onCheckParams = function() {
@@ -528,11 +633,18 @@ zabbix_export:
         			solicitacao: {type: 'string'},
         			tipo_ocorrencia: {type: 'string'},
         			auto_categoria: {type: 'string'},
-        			grupo_transferencia: {type: 'string'},
+        			cod_grupo: {type: 'string'},
         			alert_message: {type: 'string'}
         		},
         		this.params
         	);
+        	
+        	// Validar event_tags se evento for do tipo trigger
+        	if (CParamValidator.inArray(this.params.event_source, ['0', '3', '4'])) {
+        		CParamValidator.validate({
+        			event_tags: {type: 'array', macro: 'EVENT.TAGSJSON', tags: true, default: {}}
+        		}, this.params);
+        	}
         	
         	// Parâmetros opcionais
         	if (!CParamValidator.isDefined(this.params.alert_subject)) {
@@ -565,23 +677,68 @@ zabbix_export:
         	if (!CParamValidator.isDefined(this.params.event_time)) {
         		this.params.event_time = '';
         	}
+        	if (!CParamValidator.isDefined(this.params.alert_sendto)) {
+        		this.params.alert_sendto = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_acknowledged)) {
+        		this.params.event_acknowledged = '0';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_ack_user)) {
+        		this.params.event_ack_user = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_ack_message)) {
+        		this.params.event_ack_message = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_update_message)) {
+        		this.params.event_update_message = '';
+        	}
         	
-        	this.result = {};
+        	this.result = {tags: {}};
         };
         
         DeskManager.prototype.onEvent = function(alert) {
         	Logger.log(Logger.INFO, 'Source: ' + alert.source + '; Event: ' + alert.event);
+        	Logger.log(Logger.INFO, 'Event update status: ' + this.params.event_update_status);
         	
-        	// Autenticar na API
+        	var existing_ticket = this.getTicketID();
+        
+        	// Atualização de evento existente
+        	if (this.params.event_update_status === '1' && existing_ticket !== null) {
+        		Logger.log(Logger.INFO, 'Event update detected. Adding interaction to ticket: ' + existing_ticket);
+        		this.authenticateAPI();
+        		var interaction_id = this.addInteraction(existing_ticket);
+        
+        		this.result = {
+        			'ticket_id': existing_ticket,
+        			'interaction_id': interaction_id,
+        			'status': 'interaction_added',
+        			'tags': {
+        				'__desk_ticket_id': existing_ticket
+        			}
+        		};
+        		return this.result;
+        	}
+        
+        	// Ticket já existe
+        	if (existing_ticket !== null) {
+        		Logger.log(Logger.INFO, 'Ticket already exists for this event. Ticket ID: ' + existing_ticket);
+        		this.result = {
+        			'ticket_id': existing_ticket,
+        			'status': 'already_exists',
+        			'tags': {
+        				'__desk_ticket_id': existing_ticket
+        			}
+        		};
+        		return this.result;
+        	}
+        
+        	// Criar novo ticket
+        	Logger.log(Logger.INFO, 'Creating new ticket...');
         	this.authenticateAPI();
-        	
-        	// Obter mapeamento de severidade
+        
         	var severity_map = this.getSeverityMapping(this.params.event_nseverity);
-        	
-        	// Construir descrição
         	var description = this.buildDescription();
-        	
-        	// Construir payload do chamado
+        
         	var ticket_data = {
         		'TChamado': {
         			'Solicitante': this.params.solicitante,
@@ -593,23 +750,22 @@ zabbix_export:
         			'Urgencia': severity_map.urgencia,
         			'EnviaEmail': 'S',
         			'AutoCategoria': this.params.auto_categoria,
-        			'TransfCodGrupo': this.params.grupo_transferencia
+        			'TransfCodGrupo': this.params.cod_grupo
         		}
         	};
-        	
+        
         	Logger.log(Logger.INFO, 'Opening ticket in Desk Manager...');
         	Logger.log(Logger.INFO, 'Ticket data: ' + JSON.stringify(ticket_data));
-        	
-        	// Abrir chamado
+        
         	this.request.clearHeader();
         	this.request.addHeaders('Authorization: ' + this.api_token);
-        	
+        
         	var response = this.request.jsonRequest('PUT', 'https://api.desk.ms/ChamadosSuporte', ticket_data);
-        	
+        
         	if (this.request.getStatus() !== 200) {
         		Logger.log(Logger.WARN, 'HTTP code: ' + this.request.getStatus());
         		Logger.log(Logger.WARN, 'Response: ' + JSON.stringify(response));
-        		
+        
         		if (CParamValidator.isDefined(response.erro)) {
         			throw 'Desk Manager API error: ' + response.erro;
         		}
@@ -617,23 +773,40 @@ zabbix_export:
         			throw 'Failed to create ticket. HTTP code: ' + this.request.getStatus();
         		}
         	}
-        	
-        	// Verificar se há erro na resposta
+        
         	if (CParamValidator.isDefined(response.erro)) {
         		throw 'Desk Manager API error: ' + response.erro;
         	}
-        	
-        	// Se chegou aqui, o chamado foi criado com sucesso
-        	var ticket_id = (typeof response === 'string') ? response : response.Chave;
+        
+        	var ticket_id = null;
+        
+        	if (typeof response === 'string') {
+        		// Exemplo: "1025-000132"
+        		ticket_id = response;
+        	}
+        	else if (Array.isArray(response) && response.length > 0) {
+        		// Exemplo: ["1025-000132"]
+        		ticket_id = response[0];
+        	}
+        
         	Logger.log(Logger.INFO, 'Ticket created successfully. ID: ' + ticket_id);
-        	
+        
+        	if (!ticket_id) {
+        		Logger.log(Logger.WARN, 'Could not determine ticket ID from Desk Manager response!');
+        		throw 'Invalid response from Desk Manager API. Expected ticket ID but got: ' + JSON.stringify(response);
+        	}
+        
         	this.result = {
         		'ticket_id': ticket_id,
-        		'status': 'success'
+        		'status': 'success',
+        		'tags': {
+        			'__desk_ticket_id': ticket_id
+        		}
         	};
-        	
+        
         	return this.result;
         };
+        
         
         try {
         	var hook = new DeskManager(value);
@@ -644,3 +817,30 @@ zabbix_export:
         	Logger.log(Logger.WARN, 'notification failed: ' + error);
         	throw 'Sending failed: ' + error;
         }
+      process_tags: 'YES'
+      description: 'This media type integrates Zabbix with Desk Manager using the Zabbix webhook feature.'
+      message_templates:
+        - event_source: TRIGGERS
+          operation_mode: PROBLEM
+          subject: '<b>[ {HOST.NAME} ] Problema: {EVENT.NAME}</b>'
+          message: |
+            <b>Status:</b> {EVENT.STATUS}
+            <b>Hostname:</b> {HOST.NAME}
+            <b>Incidente:</b> {EVENT.NAME}
+            <b>Problema iniciou:</b> às {EVENT.TIME} do dia {EVENT.DATE}
+            <b>Severidade:</b> {EVENT.SEVERITY}
+            <b>Item Key:</b> {ITEM.KEY}
+            <b>Último valor:</b> {EVENT.OPDATA}
+            <b>Descrição:</b> {TRIGGER.DESCRIPTION}
+        - event_source: TRIGGERS
+          operation_mode: UPDATE
+          subject: '{EVENT.UPDATE.MESSAGE}'
+          message: |
+            <b>Atualizado por:</b> {USER.FULLNAME}
+            <b>Ações:</b> {EVENT.UPDATE.ACTION}
+            <b>Reconhecido:</b>  {EVENT.ACK.STATUS}
+            
+            <b>Status atual:</b> {EVENT.STATUS}
+            <b>Duração de:</b> {EVENT.AGE}
+            
+            Atualizado em {EVENT.UPDATE.DATE} às {EVENT.UPDATE.TIME}
