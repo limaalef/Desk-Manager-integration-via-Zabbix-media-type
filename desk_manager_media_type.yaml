@@ -1,0 +1,846 @@
+zabbix_export:
+  version: '7.4'
+  media_types:
+    - name: 'Desk Manager'
+      type: WEBHOOK
+      parameters:
+        - name: alert_message
+          value: '{ALERT.MESSAGE}'
+        - name: alert_sendto
+          value: '{ALERT.SENDTO}'
+        - name: alert_subject
+          value: '{ALERT.SUBJECT}'
+        - name: api_url
+          value: 'https://api.desk.ms'
+        - name: auto_categoria
+          value: '<INSIRA CODIGO AUTO CATEGORIA>'
+        - name: chave_ambiente
+          value: '<INSIRA SEU TOKEN>'
+        - name: chave_operador
+          value: '<INSIRA SEU TOKEN>'
+        - name: cod_grupo
+          value: '<INSIRA CODIGO DO GRUPO>'
+        - name: email_solicitante
+          value: '<INSIRA EMAIL SOLICITANTE>'
+        - name: event_id
+          value: '{EVENT.ID}'
+        - name: event_nseverity
+          value: '{EVENT.NSEVERITY}'
+        - name: event_severity
+          value: '{EVENT.SEVERITY}'
+        - name: event_source
+          value: '{EVENT.SOURCE}'
+        - name: event_tags
+          value: '{EVENT.TAGSJSON}'
+        - name: event_update_nseverity
+          value: '{EVENT.UPDATE.NSEVERITY}'
+        - name: event_update_severity
+          value: '{EVENT.UPDATE.SEVERITY}'
+        - name: event_update_status
+          value: '{EVENT.UPDATE.STATUS}'
+        - name: event_value
+          value: '{EVENT.VALUE}'
+        - name: solicitacao
+          value: '<INSIRA CODIGO SOLICITACAO>'
+        - name: solicitante
+          value: '<INSIRA CODIGO SOLICITANTE'
+        - name: tipo_ocorrencia
+          value: '<INSIRA CODIGO TIPO OCORRENCIA>'
+        - name: trigger_id
+          value: '{TRIGGER.ID}'
+        - name: zabbix_url
+          value: '{$ZABBIX.URL}'
+      attempts: '1'
+      script: |
+        const CLogger = function(serviceName) {
+        	this.serviceName = serviceName;
+        	this.INFO = 4
+        	this.WARN = 3
+        	this.ERROR = 2
+        	this.log = function(level, msg) {
+        		Zabbix.log(level, '[' + this.serviceName + '] ' + msg);
+        	}
+        }
+        
+        const CWebhook = function(value) {
+        	try {
+        		params = JSON.parse(value);
+        
+        		if (['0', '1', '2', '3', '4'].indexOf(params.event_source) === -1) {
+        			throw 'Incorrect "event_source" parameter given: ' + params.event_source + '.\nMust be 0-4.';
+        		}
+        
+        		if (['0', '3', '4'].indexOf(params.event_source) !== -1 && ['0', '1'].indexOf(params.event_value) === -1) {
+        			throw 'Incorrect "event_value" parameter given: ' + params.event_value + '.\nMust be 0 or 1.';
+        		}
+        
+        		if (['0', '3', '4'].indexOf(params.event_source) !== -1) {
+        			if (params.event_source === '1' && ['0', '1', '2', '3'].indexOf(params.event_value) === -1) {
+        				throw 'Incorrect "event_value" parameter given: ' + params.event_value + '.\nMust be 0-3.';
+        			}
+        
+        			if (params.event_source === '0' && ['0', '1'].indexOf(params.event_update_status) === -1) {
+        				throw 'Incorrect "event_update_status" parameter given: ' + params.event_update_status + '.\nMust be 0 or 1.';
+        			}
+        
+        			if (params.event_source === '4') {
+        				if (['0', '1', '2', '3', '4', '5'].indexOf(params.event_update_nseverity) !== -1 && params.event_update_nseverity != params.event_nseverity) {
+        					params.event_nseverity = params.event_update_nseverity;
+        					params.event_severity = params.event_update_severity;
+        					params.event_update_status = '1';
+        				}
+        			}
+        		}
+        
+        		this.runCallback = function(name, params) {
+        			if (typeof this[name] === 'function') {
+        				return this[name].apply(this, [params]);
+        			}
+        		}
+        
+        		this.handleEvent = function(source, event) {
+        			const alert = { source: source, event: event };
+        			return [
+        				this.runCallback('on' + source + event, alert),
+        				this.runCallback('on' + event, alert),
+        				this.runCallback('onEvent', alert)
+        			];
+        		}
+        
+        		this.handleEventless = function(source) {
+        			const alert = { source: source, event: null };
+        			return [
+        				this.runCallback('on' + source, alert),
+        				this.runCallback('onEvent', alert)
+        			];
+        		}
+        
+        		this.run = function() {
+        			var results = [];
+        			if (typeof this.httpProxy === 'string' && this.httpProxy.trim() !== '') {
+        				this.request.setProxy(this.httpProxy);
+        			}
+        			const types = { '0': 'Trigger', '1': 'Discovery', '2': 'Autoreg', '3': 'Internal', '4': 'Service' };
+        
+        			if (['0', '3', '4'].indexOf(this.params.event_source) !== -1) {
+        				var event = (this.params.event_update_status === '1')
+        					? 'Update'
+        					: ((this.params.event_value === '1') ? 'Problem' : 'Resolve');
+        
+        				results = this.handleEvent(types[this.params.event_source], event);
+        			}
+        			else if (typeof types[this.params.event_source] !== 'undefined') {
+        				results = this.handleEventless(types[this.params.event_source]);
+        			}
+        			else {
+        				throw 'Unexpected "event_source": ' + this.params.event_source;
+        			}
+        
+        			for (idx in results) {
+        				if (typeof results[idx] !== 'undefined') {
+        					return JSON.stringify(results[idx]);
+        				}
+        			}
+        		}
+        		this.httpProxy = params.http_proxy;
+        		this.params = params;
+        		this.runCallback('onCheckParams', {});
+        	} catch (error) {
+        		throw 'Webhook processing failed: ' + error;
+        	}
+        }
+        
+        const CParamValidator = {
+        
+        	isType: function(value, type) {
+        		if (type === 'array') {
+        			return Array.isArray(value);
+        		}
+        		if (type === 'integer') {
+        			return CParamValidator.isInteger(value);
+        		}
+        		if (type === 'float') {
+        			return CParamValidator.isFloat(value);
+        		}
+        
+        		return (typeof value === type);
+        	},
+        
+        	isInteger: function(value) {
+        		if (!CParamValidator.ifMatch(value, /^-?\d+$/)) {
+        			return false;
+        		}
+        
+        		return !isNaN(parseInt(value));
+        	},
+        
+        	isFloat: function(value) {
+        		if (!CParamValidator.ifMatch(value, /^-?\d+\.\d+$/)) {
+        			return false;
+        		}
+        
+        		return !isNaN(parseFloat(value));
+        	},
+        
+        	isDefined: function(value) {
+        		return !CParamValidator.isType(value, 'undefined');
+        	},
+        
+        	isEmpty: function(value) {
+        		if (!CParamValidator.isType(value, 'string')) {
+        			throw 'Value "' + value + '" must be a string to be checked for emptiness.';
+        		}
+        
+        		return (value.trim() === '');
+        	},
+        
+        	isMacroSet: function(value, macro) {
+        		if (CParamValidator.isDefined(macro)) {
+        			return !(CParamValidator.ifMatch(value, '^\{' + macro + '\}$'))
+        		}
+        
+        		return !(CParamValidator.ifMatch(value, '^\{[$#]{0,1}[A-Z_\.]+[\:]{0,1}["]{0,1}.*["]{0,1}\}$') || value === '*UNKNOWN*')
+        	},
+        
+        	withinRange: function(value, min, max) {
+        		if (!CParamValidator.isType(value, 'number')) {
+        			throw 'Value "' + value + '" must be a number to be checked for range.';
+        		}
+        		if (value < ((CParamValidator.isDefined(min)) ? min : value)
+        			|| value > ((CParamValidator.isDefined(max)) ? max : value)) {
+        			return false;
+        		}
+        
+        		return true;
+        	},
+        
+        	inArray: function(value, array) {
+        		if (!CParamValidator.isType(array, 'array')) {
+        			throw 'The array must be an array to check the value for existing in it.';
+        		}
+        
+        		return (array.indexOf((typeof value === 'string') ? value.toLowerCase() : value) !== -1);
+        	},
+        
+        	ifMatch: function(value, regex) {
+        		return (new RegExp(regex)).test(value);
+        	},
+        
+        	match: function(value, regex) {
+        		if (!CParamValidator.isType(value, 'string')) {
+        			throw 'Value "' + value + '" must be a string to be matched with the regular expression.';
+        		}
+        
+        		return value.match(new RegExp(regex));
+        	},
+        
+        	checkURL: function(value) {
+        		if (CParamValidator.isEmpty(value)) {
+        			throw 'URL value "' + value + '" must be a non-empty string.';
+        		}
+        		if (!CParamValidator.ifMatch(value, '^(http|https):\/\/.+')) {
+        			throw 'URL value "' + value + '" must contain a schema.';
+        		}
+        
+        		return value.endsWith('/') ? value.slice(0, -1) : value;
+        	},
+        
+        	check: function(key, rule, params) {
+        		if (!CParamValidator.isDefined(rule.type)) {
+        			throw 'Mandatory attribute "type" has not been defined for parameter "' + key + '".';
+        		}
+        		if (!CParamValidator.isDefined(params[key])) {
+        			throw 'Checked parameter "' + key + '" was not found in the list of input parameters.';
+        		}
+        		var value = params[key],
+        			error_message = null;
+        		switch (rule.type) {
+        			case 'string':
+        				if (!CParamValidator.isType(value, 'string')) {
+        					throw 'Value "' + key + '" must be a string.';
+        				}
+        				if (CParamValidator.isEmpty(value)) {
+        					error_message = 'Value "' + key + '" must be a non-empty string';
+        					break;
+        				}
+        				if (CParamValidator.isDefined(rule.len) && value.length < rule.len) {
+        					error_message = 'Value "' + key + '" must be a string with a length > ' + rule.len;
+        				}
+        				if (CParamValidator.isDefined(rule.regex) && !CParamValidator.ifMatch(value, rule.regex)) {
+        					error_message = 'Value "' + key + '" must match the regular expression "' + rule.regex + '"';
+        				}
+        				if (CParamValidator.isDefined(rule.url) && rule.url === true) {
+        					value = CParamValidator.checkURL(value);
+        				}
+        				break;
+        			case 'integer':
+        				if (!CParamValidator.isInteger(value)) {
+        					error_message = 'Value "' + key + '" must be an integer';
+        					break;
+        				}
+        				value = parseInt(value);
+        				break;
+        			case 'float':
+        				if (!CParamValidator.isFloat(value)) {
+        					error_message = 'Value "' + key + '" must be a floating-point number';
+        					break;
+        				}
+        				value = parseFloat(value);
+        				break;
+        			case 'boolean':
+        				if (CParamValidator.inArray(value, ['1', 'true', 'yes', 'on'])) {
+        					value = true;
+        				}
+        				else if (CParamValidator.inArray(value, ['0', 'false', 'no', 'off'])) {
+        					value = false;
+        				}
+        				else {
+        					error_message = 'Value "' + key + '" must be a boolean-like.';
+        				}
+        				break;
+        			case 'array':
+        				try {
+        					value = JSON.parse(value);
+        				} catch (error) {
+        					throw 'Value "' + key + '" contains invalid JSON.';
+        				}
+        				if (!CParamValidator.isType(value, 'array')) {
+        					error_message = 'Value "' + key + '" must be an array.';
+        				}
+        				if (CParamValidator.isDefined(rule.tags) && rule.tags === true) {
+        					value = value.reduce(function(acc, obj) {
+        						acc[obj.tag] = obj.value || null;
+        						return acc;
+        					}, {});
+        				}
+        				break;
+        			case 'object':
+        				value = JSON.parse(value);
+        				if (!CParamValidator.isType(value, 'object')) {
+        					error_message = 'Value "' + key + '" must be an object.';
+        				}
+        				break;
+        			default:
+        				throw 'Unexpected attribute type "' + rule.type + '" for value "' + key + '". Available: ' +
+        				['integer', 'float', 'string', 'boolean', 'array', 'object'].join(', ');
+        		}
+        		params[key] = value;
+        		if (CParamValidator.inArray(rule.type, ['integer', 'float']) && error_message === null && (CParamValidator.isDefined(rule.min)
+        			|| CParamValidator.isDefined(rule.max)) && !CParamValidator.withinRange(value, rule.min, rule.max)) {
+        			error_message = 'Value "' + key + '" must be a number ' + ((CParamValidator.isDefined(rule.min) && CParamValidator.isDefined(rule.max))
+        				? (rule.min + '..' + rule.max) : ((CParamValidator.isDefined(rule.min)) ? '>' + rule.min : '<' + rule.max));
+        		}
+        		else if (CParamValidator.isDefined(rule.array) && !CParamValidator.inArray(value, rule.array)) {
+        			error_message = 'Value "' + key + '" must be in the array ' + JSON.stringify(rule.array);
+        		}
+        		else if (CParamValidator.isDefined(rule.macro) && !CParamValidator.isMacroSet(value.toString(), rule.macro)) {
+        			error_message = 'The macro ' + ((CParamValidator.isDefined(rule.macro)) ? '{' + rule.macro + '} ' : ' ') + 'is not set';
+        		}
+        		if (error_message !== null) {
+        			if (CParamValidator.isDefined(rule.default) && CParamValidator.isType(rule.default, rule.type)) {
+        				params[key] = rule.default;
+        			}
+        			else {
+        				Zabbix.log(4, 'Default value for "' + key + '" must be a ' + rule.type + '. Skipped.');
+        				throw 'Incorrect value for variable "' + key + '". ' + error_message;
+        			}
+        		}
+        
+        		return this;
+        	},
+        
+        	validate: function(rules, params) {
+        		if (!CParamValidator.isType(params, 'object') || CParamValidator.isType(params, 'array')) {
+        			throw 'Incorrect parameters value. The value must be an object.';
+        		}
+        		for (var key in rules) {
+        			CParamValidator.check(key, rules[key], params);
+        		}
+        	}
+        }
+        
+        const CHttpRequest = function(logger) {
+        	this.request = new HttpRequest();
+        	if (typeof logger !== 'object' || logger === null) {
+        		this.logger = Zabbix;
+        	}
+        	else {
+        		this.logger = logger;
+        	}
+        
+        	this.clearHeader = function() {
+        		this.request.clearHeader();
+        	}
+        
+        	this.addHeaders = function(value) {
+        		var headers = [];
+        
+        		if (typeof value === 'object' && value !== null) {
+        			if (!Array.isArray(value)) {
+        				Object.keys(value).forEach(function(key) {
+        					headers.push(key + ': ' + value[key]);
+        				});
+        			}
+        			else {
+        				headers = value;
+        			}
+        		}
+        		else if (typeof value === 'string') {
+        			value.split('\r\n').forEach(function(header) {
+        				headers.push(header);
+        			});
+        		}
+        
+        		for (var idx in headers) {
+        			this.request.addHeader(headers[idx]);
+        		}
+        	}
+        
+        	this.setProxy = function(proxy) {
+        		this.request.setProxy(proxy);
+        	}
+        
+        	this.plainRequest = function(method, url, data) {
+        		var resp = null;
+        		method = method.toLowerCase();
+        		this.logger.log(4, 'Sending ' + method + ' request:' + JSON.stringify(data));
+        		if (['get', 'post', 'put', 'patch', 'delete', 'trace'].indexOf(method) !== -1) {
+        			resp = this.request[method](url, data);
+        		}
+        		else if (['connect', 'head', 'options'].indexOf(method) !== -1) {
+        			resp = this.request[method](url);
+        		}
+        		else {
+        			throw 'Unexpected method. Method ' + method + ' is not supported.';
+        		}
+        		this.logger.log(4, 'Response has been received: ' + resp);
+        
+        		return resp;
+        	}
+        
+        	this.jsonRequest = function(method, url, data) {
+        		this.addHeaders('Content-Type: application/json');
+        		var resp = this.plainRequest(method, url, JSON.stringify(data));
+        		try {
+        			resp = JSON.parse(resp);
+        		}
+        		catch (error) {
+        			throw 'Failed to parse response: not well-formed JSON was received';
+        		}
+        
+        		return resp;
+        	}
+        
+        	this.getStatus = function() {
+        		return this.request.getStatus();
+        	}
+        }
+        
+        var serviceLogName = 'Desk Manager Webhook',
+        	Logger = new CLogger(serviceLogName),
+        	DeskManager = CWebhook;
+        
+        DeskManager.prototype.getSeverityMapping = function(severity) {
+        	// Mapeia severidade do Zabbix para Impacto e Urgência do Desk Manager
+        	// Disaster = 5, High = 4, Average = 3, Warning = 2, Information = 1, Not classified = 0
+        	const mappings = {
+        		'5': { impacto: '000003', urgencia: '000003' }, // Disaster - Impacto 3, Urgência 3
+        		'4': { impacto: '000002', urgencia: '000003' }, // High - Impacto 2, Urgência 3
+        		'3': { impacto: '000002', urgencia: '000002' }, // Average - Impacto 2, Urgência 2
+        		'2': { impacto: '000002', urgencia: '000001' }, // Warning - Impacto 2, Urgência 1
+        		'1': { impacto: '000001', urgencia: '000001' }, // Information - Impacto 1, Urgência 1
+        		'0': { impacto: '000001', urgencia: '000001' }  // Not classified - Impacto 1, Urgência 1
+        	};
+        	
+        	return mappings[severity] || mappings['0'];
+        }
+        
+        DeskManager.prototype.authenticateAPI = function() {
+        	Logger.log(Logger.INFO, 'Authenticating with Desk Manager API...');
+        	
+        	this.request.clearHeader();
+        	this.request.addHeaders('Authorization: ' + this.params.chave_operador);
+        	
+        	var auth_data = {
+        		'PublicKey': this.params.chave_ambiente
+        	};
+        	
+        	var response = this.request.jsonRequest('POST', 'https://api.desk.ms/Login/autenticar', auth_data);
+        	
+        	if (this.request.getStatus() !== 200) {
+        		throw 'Authentication failed. HTTP code: ' + this.request.getStatus();
+        	}
+        	
+        	this.api_token = response;
+        	Logger.log(Logger.INFO, 'Authentication successful');
+        }
+        
+        DeskManager.prototype.buildDescription = function() {
+        	var description = '';
+        	
+        	if (this.params.alert_subject && this.params.alert_subject !== '') {
+        		description += this.params.alert_subject + '\n';
+        	}
+        	
+        	if (this.params.event_severity && this.params.event_severity !== '') {
+        		description += 'SEVERIDADE: ' + this.params.event_severity + '\n';
+        	}
+        	
+        	if (this.params.alert_message && this.params.alert_message !== '') {
+        		description += '\n<b>TRIGGER INFORMATION</b>\n' + this.params.alert_message + '\n';
+        	}
+        	
+        	if (this.params.zabbix_url && this.params.trigger_id && this.params.event_id) {
+        		description += '\nMais informações em: ';
+        		description += this.params.zabbix_url + '/tr_events.php?triggerid=' + 
+        		               this.params.trigger_id + '&eventid=' + this.params.event_id;
+        	}
+        	
+        	return description;
+        }
+        
+        DeskManager.prototype.buildInteractionDescription = function() {
+        	var description = '';
+        	
+        	if (this.params.alert_subject && this.params.alert_subject !== '') {
+        		description += this.params.alert_subject + '\n\n\n';
+        	}
+        
+        	if (this.params.alert_message && this.params.alert_message !== '') {
+        		description += this.params.alert_message + '\n';
+        	}
+        
+        	if (this.params.zabbix_url && this.params.trigger_id && this.params.event_id) {
+        		description += 'Mais informações em: ';
+        		description += this.params.zabbix_url + '/tr_events.php?triggerid=' + 
+        		               this.params.trigger_id + '&eventid=' + this.params.event_id;
+        	}
+        	
+        	return description;
+        }
+        
+        DeskManager.prototype.addInteraction = function(ticket_id) {
+        	Logger.log(Logger.INFO, 'Adding interaction to ticket: ' + ticket_id);
+        	
+        	var interaction_description = this.buildInteractionDescription();
+        	var descLower = interaction_description.toLowerCase();
+        
+        	// Procura o nome do operador e devolve o código respectivo
+        	var cod_operador = '';
+        
+        	if (this.params.alert_sendto && this.params.alert_sendto.trim() !== '') {
+        		var usuarios = JSON.parse(this.params.alert_sendto);
+        
+        		for (var usuario in usuarios) {
+        			if (descLower.includes(usuario)) {
+        				cod_operador = usuarios[usuario];
+        				Logger.log(Logger.INFO, 'CodOperador set to: ' + cod_operador);
+        			}
+        		}
+        	}
+        
+        	// Acknowledge = Pausa, senão em atendimento
+        	if (interaction_description.includes("Reconhecido: No")) {
+        		cod_status = '000006'
+        	} else {
+        		cod_status = '000020'
+        	}
+        
+        	// Gerar data e hora automaticamente
+        	var now = new Date();
+        	var horaInicial = new Date(now.getTime() - 2 * 60 * 1000);
+        	var horaFinal = new Date(now);
+        
+        	function formatDate(d) {
+        		var day = ('0' + d.getDate()).slice(-2);
+        		var month = ('0' + (d.getMonth() + 1)).slice(-2);
+        		var year = d.getFullYear();
+        		return day + '-' + month + '-' + year;
+        	}
+        
+        	function formatTime(d) {
+        		var h = ('0' + d.getHours()).slice(-2);
+        		var m = ('0' + d.getMinutes()).slice(-2);
+        		var s = ('0' + d.getSeconds()).slice(-2);
+        		return h + ':' + m + ':' + s;
+        	}
+        	
+        	// Construir payload da interação
+        	var interaction_data = {
+        		'Chave': ticket_id,
+        		'TChamado': {
+        			'CodFormaAtendimento': '000004',
+        			'CodStatus': cod_status,
+        			'Descricao': interaction_description,
+        			'EnviarEmail': 'N',
+        			'EnvBase': 'N',
+        			'DataInteracao': formatDate(now),
+        			'HoraInicial': formatTime(horaInicial),
+        			'HoraFinal': formatTime(horaFinal),
+        			'PrimeiroAtendimento': 'N',
+        			'SegundoAtendimento': 'N',
+        			"CodGrupo": this.params.cod_grupo,
+        			'CodOperador': cod_operador
+        		}
+        	};
+        	
+        	Logger.log(Logger.INFO, 'Interaction data: ' + JSON.stringify(interaction_data));
+        	
+        	// Enviar interação
+        	this.request.clearHeader();
+        	this.request.addHeaders('Authorization: ' + this.api_token);
+        	
+        	var response = this.request.jsonRequest('PUT', 'https://api.desk.ms/ChamadosSuporte/interagir', interaction_data);
+        	
+        	if (this.request.getStatus() !== 200) {
+        		Logger.log(Logger.WARN, 'HTTP code: ' + this.request.getStatus());
+        		Logger.log(Logger.WARN, 'Response: ' + JSON.stringify(response));
+        		
+        		if (CParamValidator.isDefined(response.erro)) {
+        			throw 'Desk Manager API error on interaction: ' + response.erro;
+        		}
+        		else {
+        			throw 'Failed to add interaction. HTTP code: ' + this.request.getStatus();
+        		}
+        	}
+        	
+        	// Verificar se há erro na resposta
+        	if (CParamValidator.isDefined(response.erro)) {
+        		throw 'Desk Manager API error on interaction: ' + response.erro;
+        	}
+        	
+        	var interaction_id = (typeof response === 'string') ? response : (response.Chave || response.interaction_id);
+        	Logger.log(Logger.INFO, 'Interaction added successfully. ID: ' + interaction_id);
+        	
+        	return interaction_id;
+        }
+        
+        DeskManager.prototype.getTicketID = function() {
+        	const tag_key = '__desk_ticket_id';
+        	if (CParamValidator.isDefined(this.params.event_tags) && CParamValidator.isDefined(this.params.event_tags[tag_key])) {
+        		return this.params.event_tags[tag_key];
+        	}
+        	return null;
+        }
+        
+        DeskManager.prototype.onCheckParams = function() {
+        	CParamValidator.validate(
+        		{
+        			chave_operador: {type: 'string'},
+        			chave_ambiente: {type: 'string'},
+        			solicitante: {type: 'string'},
+        			email_solicitante: {type: 'string'},
+        			solicitacao: {type: 'string'},
+        			tipo_ocorrencia: {type: 'string'},
+        			auto_categoria: {type: 'string'},
+        			cod_grupo: {type: 'string'},
+        			alert_message: {type: 'string'}
+        		},
+        		this.params
+        	);
+        	
+        	// Validar event_tags se evento for do tipo trigger
+        	if (CParamValidator.inArray(this.params.event_source, ['0', '3', '4'])) {
+        		CParamValidator.validate({
+        			event_tags: {type: 'array', macro: 'EVENT.TAGSJSON', tags: true, default: {}}
+        		}, this.params);
+        	}
+        	
+        	// Parâmetros opcionais
+        	if (!CParamValidator.isDefined(this.params.alert_subject)) {
+        		this.params.alert_subject = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_nseverity)) {
+        		this.params.event_nseverity = '0';
+        	}
+        	if (!CParamValidator.isDefined(this.params.zabbix_url)) {
+        		this.params.zabbix_url = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.trigger_id)) {
+        		this.params.trigger_id = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_id)) {
+        		this.params.event_id = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.trigger_name)) {
+        		this.params.trigger_name = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.host_name)) {
+        		this.params.host_name = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_severity)) {
+        		this.params.event_severity = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_date)) {
+        		this.params.event_date = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_time)) {
+        		this.params.event_time = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.alert_sendto)) {
+        		this.params.alert_sendto = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_acknowledged)) {
+        		this.params.event_acknowledged = '0';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_ack_user)) {
+        		this.params.event_ack_user = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_ack_message)) {
+        		this.params.event_ack_message = '';
+        	}
+        	if (!CParamValidator.isDefined(this.params.event_update_message)) {
+        		this.params.event_update_message = '';
+        	}
+        	
+        	this.result = {tags: {}};
+        };
+        
+        DeskManager.prototype.onEvent = function(alert) {
+        	Logger.log(Logger.INFO, 'Source: ' + alert.source + '; Event: ' + alert.event);
+        	Logger.log(Logger.INFO, 'Event update status: ' + this.params.event_update_status);
+        	
+        	var existing_ticket = this.getTicketID();
+        
+        	// Atualização de evento existente
+        	if (this.params.event_update_status === '1' && existing_ticket !== null) {
+        		Logger.log(Logger.INFO, 'Event update detected. Adding interaction to ticket: ' + existing_ticket);
+        		this.authenticateAPI();
+        		var interaction_id = this.addInteraction(existing_ticket);
+        
+        		this.result = {
+        			'ticket_id': existing_ticket,
+        			'interaction_id': interaction_id,
+        			'status': 'interaction_added',
+        			'tags': {
+        				'__desk_ticket_id': existing_ticket
+        			}
+        		};
+        		return this.result;
+        	}
+        
+        	// Ticket já existe
+        	if (existing_ticket !== null) {
+        		Logger.log(Logger.INFO, 'Ticket already exists for this event. Ticket ID: ' + existing_ticket);
+        		this.result = {
+        			'ticket_id': existing_ticket,
+        			'status': 'already_exists',
+        			'tags': {
+        				'__desk_ticket_id': existing_ticket
+        			}
+        		};
+        		return this.result;
+        	}
+        
+        	// Criar novo ticket
+        	Logger.log(Logger.INFO, 'Creating new ticket...');
+        	this.authenticateAPI();
+        
+        	var severity_map = this.getSeverityMapping(this.params.event_nseverity);
+        	var description = this.buildDescription();
+        
+        	var ticket_data = {
+        		'TChamado': {
+        			'Solicitante': this.params.solicitante,
+        			'Email': this.params.email_solicitante,
+        			'Descricao': description,
+        			'Solicitacao': this.params.solicitacao,
+        			'TipoOcorrencia': this.params.tipo_ocorrencia,
+        			'Impacto': severity_map.impacto,
+        			'Urgencia': severity_map.urgencia,
+        			'EnviaEmail': 'S',
+        			'AutoCategoria': this.params.auto_categoria,
+        			'TransfCodGrupo': this.params.cod_grupo
+        		}
+        	};
+        
+        	Logger.log(Logger.INFO, 'Opening ticket in Desk Manager...');
+        	Logger.log(Logger.INFO, 'Ticket data: ' + JSON.stringify(ticket_data));
+        
+        	this.request.clearHeader();
+        	this.request.addHeaders('Authorization: ' + this.api_token);
+        
+        	var response = this.request.jsonRequest('PUT', 'https://api.desk.ms/ChamadosSuporte', ticket_data);
+        
+        	if (this.request.getStatus() !== 200) {
+        		Logger.log(Logger.WARN, 'HTTP code: ' + this.request.getStatus());
+        		Logger.log(Logger.WARN, 'Response: ' + JSON.stringify(response));
+        
+        		if (CParamValidator.isDefined(response.erro)) {
+        			throw 'Desk Manager API error: ' + response.erro;
+        		}
+        		else {
+        			throw 'Failed to create ticket. HTTP code: ' + this.request.getStatus();
+        		}
+        	}
+        
+        	if (CParamValidator.isDefined(response.erro)) {
+        		throw 'Desk Manager API error: ' + response.erro;
+        	}
+        
+        	var ticket_id = null;
+        
+        	if (typeof response === 'string') {
+        		// Exemplo: "1025-000132"
+        		ticket_id = response;
+        	}
+        	else if (Array.isArray(response) && response.length > 0) {
+        		// Exemplo: ["1025-000132"]
+        		ticket_id = response[0];
+        	}
+        
+        	Logger.log(Logger.INFO, 'Ticket created successfully. ID: ' + ticket_id);
+        
+        	if (!ticket_id) {
+        		Logger.log(Logger.WARN, 'Could not determine ticket ID from Desk Manager response!');
+        		throw 'Invalid response from Desk Manager API. Expected ticket ID but got: ' + JSON.stringify(response);
+        	}
+        
+        	this.result = {
+        		'ticket_id': ticket_id,
+        		'status': 'success',
+        		'tags': {
+        			'__desk_ticket_id': ticket_id
+        		}
+        	};
+        
+        	return this.result;
+        };
+        
+        
+        try {
+        	var hook = new DeskManager(value);
+        	hook.request = new CHttpRequest(Logger);
+        	return hook.run();
+        }
+        catch (error) {
+        	Logger.log(Logger.WARN, 'notification failed: ' + error);
+        	throw 'Sending failed: ' + error;
+        }
+      process_tags: 'YES'
+      description: 'This media type integrates Zabbix with Desk Manager using the Zabbix webhook feature.'
+      message_templates:
+        - event_source: TRIGGERS
+          operation_mode: PROBLEM
+          subject: '<b>[ {HOST.NAME} ] Problema: {EVENT.NAME}</b>'
+          message: |
+            <b>Status:</b> {EVENT.STATUS}
+            <b>Hostname:</b> {HOST.NAME}
+            <b>Incidente:</b> {EVENT.NAME}
+            <b>Problema iniciou:</b> às {EVENT.TIME} do dia {EVENT.DATE}
+            <b>Severidade:</b> {EVENT.SEVERITY}
+            <b>Item Key:</b> {ITEM.KEY}
+            <b>Último valor:</b> {EVENT.OPDATA}
+            <b>Descrição:</b> {TRIGGER.DESCRIPTION}
+        - event_source: TRIGGERS
+          operation_mode: UPDATE
+          subject: '{EVENT.UPDATE.MESSAGE}'
+          message: |
+            <b>Atualizado por:</b> {USER.FULLNAME}
+            <b>Ações:</b> {EVENT.UPDATE.ACTION}
+            <b>Reconhecido:</b>  {EVENT.ACK.STATUS}
+            
+            <b>Status atual:</b> {EVENT.STATUS}
+            <b>Duração de:</b> {EVENT.AGE}
+            
+            Atualizado em {EVENT.UPDATE.DATE} às {EVENT.UPDATE.TIME}
