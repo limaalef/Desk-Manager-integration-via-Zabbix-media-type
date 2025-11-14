@@ -18,10 +18,14 @@ zabbix_export:
           value: '<INSIRA SEU TOKEN>'
         - name: chave_operador
           value: '<INSIRA SEU TOKEN>'
+        - name: cod_causa
+          value: '<INSIRA CODIGO DE CAUSA>'
         - name: cod_grupo
           value: '<INSIRA CODIGO DO GRUPO>'
         - name: email_solicitante
           value: '<INSIRA EMAIL SOLICITANTE>'
+        - name: event_ack_status
+          value: '{EVENT.ACK.STATUS}'
         - name: event_id
           value: '{EVENT.ID}'
         - name: event_nseverity
@@ -43,13 +47,17 @@ zabbix_export:
         - name: solicitacao
           value: '<INSIRA CODIGO SOLICITACAO>'
         - name: solicitante
-          value: '<INSIRA CODIGO SOLICITANTE'
+          value: '<INSIRA CODIGO SOLICITANTE>'
         - name: tipo_ocorrencia
-          value: '<INSIRA CODIGO TIPO OCORRENCIA>'
+          value: '<INSIRA CODIGO TIPO DE OCORRENCIA>'
         - name: trigger_id
           value: '{TRIGGER.ID}'
+        - name: zabbix_key
+          value: <INSIRA CHAVE DE API ZABBIX>
         - name: zabbix_url
           value: '{$ZABBIX.URL}'
+        - name: zabbix_url_local
+          value: '{$ZABBIX.URL.LOCAL}'
       attempts: '1'
       script: |
         const CLogger = function(serviceName) {
@@ -444,12 +452,12 @@ zabbix_export:
         	// Mapeia severidade do Zabbix para Impacto e Urgência do Desk Manager
         	// Disaster = 5, High = 4, Average = 3, Warning = 2, Information = 1, Not classified = 0
         	const mappings = {
-        		'5': { impacto: '000003', urgencia: '000003' }, // Disaster - Impacto 3, Urgência 3
-        		'4': { impacto: '000002', urgencia: '000003' }, // High - Impacto 2, Urgência 3
+        		'5': { impacto: '000001', urgencia: '000001' }, // Disaster - Impacto 3, Urgência 3
+        		'4': { impacto: '000002', urgencia: '000001' }, // High - Impacto 2, Urgência 3
         		'3': { impacto: '000002', urgencia: '000002' }, // Average - Impacto 2, Urgência 2
-        		'2': { impacto: '000002', urgencia: '000001' }, // Warning - Impacto 2, Urgência 1
-        		'1': { impacto: '000001', urgencia: '000001' }, // Information - Impacto 1, Urgência 1
-        		'0': { impacto: '000001', urgencia: '000001' }  // Not classified - Impacto 1, Urgência 1
+        		'2': { impacto: '000002', urgencia: '000003' }, // Warning - Impacto 2, Urgência 1
+        		'1': { impacto: '000003', urgencia: '000003' }, // Information - Impacto 1, Urgência 1
+        		'0': { impacto: '000003', urgencia: '000003' }  // Not classified - Impacto 1, Urgência 1
         	};
         	
         	return mappings[severity] || mappings['0'];
@@ -465,7 +473,7 @@ zabbix_export:
         		'PublicKey': this.params.chave_ambiente
         	};
         	
-        	var response = this.request.jsonRequest('POST', 'https://api.desk.ms/Login/autenticar', auth_data);
+        	var response = this.request.jsonRequest('POST', this.params.api_url + '/Login/autenticar', auth_data);
         	
         	if (this.request.getStatus() !== 200) {
         		throw 'Authentication failed. HTTP code: ' + this.request.getStatus();
@@ -527,20 +535,22 @@ zabbix_export:
         
         	// Procura o nome do operador e devolve o código respectivo
         	var cod_operador = '';
+        	var cod_grupo = this.params.cod_grupo;
         
         	if (this.params.alert_sendto && this.params.alert_sendto.trim() !== '') {
         		var usuarios = JSON.parse(this.params.alert_sendto);
         
         		for (var usuario in usuarios) {
         			if (descLower.includes(usuario)) {
-        				cod_operador = usuarios[usuario];
+        				cod_operador = usuarios[usuario].codigo;
+        				cod_grupo = usuarios[usuario].grupo;
         				Logger.log(Logger.INFO, 'CodOperador set to: ' + cod_operador);
         			}
         		}
         	}
         
         	// Acknowledge = Pausa, senão em atendimento
-        	if (interaction_description.includes("Reconhecido: No")) {
+        	if (this.params.event_ack_status === 'No') {
         		cod_status = '000006'
         	} else {
         		cod_status = '000020'
@@ -579,7 +589,7 @@ zabbix_export:
         			'HoraFinal': formatTime(horaFinal),
         			'PrimeiroAtendimento': 'N',
         			'SegundoAtendimento': 'N',
-        			"CodGrupo": this.params.cod_grupo,
+        			"CodGrupo": cod_grupo,
         			'CodOperador': cod_operador
         		}
         	};
@@ -590,7 +600,102 @@ zabbix_export:
         	this.request.clearHeader();
         	this.request.addHeaders('Authorization: ' + this.api_token);
         	
-        	var response = this.request.jsonRequest('PUT', 'https://api.desk.ms/ChamadosSuporte/interagir', interaction_data);
+        	var response = this.request.jsonRequest('PUT', this.params.api_url + '/ChamadosSuporte/interagir', interaction_data);
+        	
+        	if (this.request.getStatus() !== 200) {
+        		Logger.log(Logger.WARN, 'HTTP code: ' + this.request.getStatus());
+        		Logger.log(Logger.WARN, 'Response: ' + JSON.stringify(response));
+        		
+        		if (CParamValidator.isDefined(response.erro)) {
+        			throw 'Desk Manager API error on interaction: ' + response.erro;
+        		}
+        		else {
+        			throw 'Failed to add interaction. HTTP code: ' + this.request.getStatus();
+        		}
+        	}
+        	
+        	// Verificar se há erro na resposta
+        	if (CParamValidator.isDefined(response.erro)) {
+        		throw 'Desk Manager API error on interaction: ' + response.erro;
+        	}
+        	
+        	var interaction_id = (typeof response === 'string') ? response : (response.Chave || response.interaction_id);
+        	Logger.log(Logger.INFO, 'Interaction added successfully. ID: ' + interaction_id);
+        	
+        	return interaction_id;
+        }
+        
+        DeskManager.prototype.addInteractionClosing = function(ticket_id) {
+        	Logger.log(Logger.INFO, 'Adding interaction to ticket: ' + ticket_id);
+        	
+        	var interaction_description = this.buildInteractionDescription();
+        	var descLower = interaction_description.toLowerCase();
+        
+        	// Procura o nome do operador e devolve o código respectivo
+        	var cod_operador = '';
+        	var cod_grupo = this.params.cod_grupo;
+        
+        	if (this.params.alert_sendto && this.params.alert_sendto.trim() !== '') {
+        		var usuarios = JSON.parse(this.params.alert_sendto);
+        
+        		for (var usuario in usuarios) {
+        			if (descLower.includes(usuario)) {
+        				cod_operador = usuarios[usuario].codigo;
+        				cod_grupo = usuarios[usuario].grupo;
+        				Logger.log(Logger.INFO, 'CodOperador set to: ' + cod_operador);
+        			}
+        		}
+        	}
+        
+        	// Resolvido
+        	cod_status = '000002';
+        
+        	// Gerar data e hora automaticamente
+        	var now = new Date();
+        	var horaInicial = new Date(now.getTime() - 60 * 60 * 1000);
+        	var horaFinal = new Date(now);
+        
+        	function formatDate(d) {
+        		var day = ('0' + d.getDate()).slice(-2);
+        		var month = ('0' + (d.getMonth() + 1)).slice(-2);
+        		var year = d.getFullYear();
+        		return day + '-' + month + '-' + year;
+        	}
+        
+        	function formatTime(d) {
+        		var h = ('0' + d.getHours()).slice(-2);
+        		var m = ('0' + d.getMinutes()).slice(-2);
+        		var s = ('0' + d.getSeconds()).slice(-2);
+        		return h + ':' + m + ':' + s;
+        	}
+        	
+        	// Construir payload da interação
+        	var interaction_data = {
+        		'Chave': ticket_id,
+        		'TChamado': {
+        			'CodFormaAtendimento': '000004',
+        			'CodStatus': cod_status,
+        			'CodCausa': this.params.cod_causa,
+        			'Descricao': interaction_description,
+        			'EnviarEmail': 'N',
+        			'EnvBase': 'N',
+        			'DataInteracao': formatDate(now),
+        			'HoraInicial': formatTime(horaInicial),
+        			'HoraFinal': formatTime(horaFinal),
+        			'PrimeiroAtendimento': 'S',
+        			'SegundoAtendimento': 'S',
+        			"CodGrupo": cod_grupo,
+        			'CodOperador': cod_operador
+        		}
+        	};
+        	
+        	Logger.log(Logger.INFO, 'Interaction data: ' + JSON.stringify(interaction_data));
+        	
+        	// Enviar interação
+        	this.request.clearHeader();
+        	this.request.addHeaders('Authorization: ' + this.api_token);
+        	
+        	var response = this.request.jsonRequest('PUT', this.params.api_url + '/ChamadosSuporte/interagir', interaction_data);
         	
         	if (this.request.getStatus() !== 200) {
         		Logger.log(Logger.WARN, 'HTTP code: ' + this.request.getStatus());
@@ -622,6 +727,93 @@ zabbix_export:
         	}
         	return null;
         }
+        
+        DeskManager.prototype.setEventMessagesOnZabbix = function(ticketid) {
+        	Logger.log(Logger.INFO, 'Consultando mensagens do evento no Zabbix...');
+        
+        	var zabbix_request = new HttpRequest();
+        
+        	const zabbix_api_url = this.params.zabbix_url_local + '/api_jsonrpc.php';
+        	const bearer = 'Authorization: Bearer ' + this.params.zabbix_key;
+        	const message = '__desk_ticket_id=' + ticketid
+        
+        	const payload = {
+        		jsonrpc: '2.0',
+        		method: 'event.acknowledge',
+        		params: {
+        			eventids: [this.params.event_id],
+        			"action": 4,
+        			"message": message
+        		},
+        		id: 1
+        	};
+        
+        	zabbix_request.addHeader('Content-Type: application/json');
+        	zabbix_request.addHeader(bearer);
+        
+        	var response = zabbix_request.post(zabbix_api_url, JSON.stringify(payload));
+        	var data = JSON.parse(response);
+        	Logger.log(Logger.INFO, response);
+        
+        	if (zabbix_request.getStatus() !== 200) {
+        		throw 'Erro ao consultar mensagens do evento. HTTP ' + zabbix_request.getStatus();
+        	}
+        
+        	return response
+        };
+        
+        DeskManager.prototype.getEventMessagesFromZabbix = function() {
+        	Logger.log(Logger.INFO, 'Consultando mensagens do evento no Zabbix...');
+        
+        	var zabbix_request = new HttpRequest();
+        
+        	const zabbix_api_url = this.params.zabbix_url_local + '/api_jsonrpc.php';
+        	const bearer = 'Authorization: Bearer ' + this.params.zabbix_key;
+        
+        	const payload = {
+        		jsonrpc: '2.0',
+        		method: 'event.get',
+        		params: {
+        			eventids: [this.params.event_id],
+        			selectAcknowledges: ['message']
+        		},
+        		id: 1
+        	};
+        
+        	zabbix_request.addHeader('Content-Type: application/json');
+        	zabbix_request.addHeader(bearer);
+        
+        	var response = zabbix_request.post(zabbix_api_url, JSON.stringify(payload));
+        	var data = JSON.parse(response);
+        	Logger.log(Logger.INFO, response);
+        
+        	if (zabbix_request.getStatus() !== 200) {
+        		throw 'Erro ao consultar mensagens do evento. HTTP ' + zabbix_request.getStatus();
+        	}
+        
+        	if (!data.result || data.result.length === 0) {
+        		Logger.log(Logger.INFO, 'Nenhuma mensagem encontrada no evento.');
+        		return [];
+        	}
+        
+        	const acknowledges = data.result[0].acknowledges || [];
+        	Logger.log(Logger.INFO, 'Mensagens obtidas: ' + JSON.stringify(acknowledges));
+        	return acknowledges;
+        };
+        
+        DeskManager.prototype.findTagInMessages = function(messages) {
+        	Logger.log(Logger.INFO, 'Procurando padrão NOMEDATAG=NUMERODATAG nas mensagens...');
+        	for (var i = 0; i < messages.length; i++) {
+        		var msg = messages[i].message || '';
+        		var match = msg.match(/([A-Za-z0-9_]+)=([0-9\-]+)/);
+        		if (match) {
+        			Logger.log(Logger.INFO, 'Tag encontrada: ' + match[1] + '=' + match[2]);
+        			return { tagName: match[1], tagValue: match[2] };
+        		}
+        	}
+        	Logger.log(Logger.INFO, 'Nenhuma tag encontrada nas mensagens.');
+        	return null;
+        };
         
         DeskManager.prototype.onCheckParams = function() {
         	CParamValidator.validate(
@@ -702,8 +894,30 @@ zabbix_export:
         	
         	var existing_ticket = this.getTicketID();
         
+            if (existing_ticket === null) {
+        		var messages = [];
+            	var foundTag = null;
+        
+                try {
+               		messages = this.getEventMessagesFromZabbix() || [];
+            	} catch (error) {
+                	console.error("Erro ao obter mensagens do Zabbix:", error);
+                	messages = [];
+            	}
+        
+        		try {
+                	foundTag = this.findTagInMessages(messages) || {};
+        			if (foundTag.tagName === "__desk_ticket_id") {
+                    	existing_ticket = foundTag.tagValue
+                	}
+            	} catch (error) {
+                	console.error("Erro ao procurar tag nas mensagens:", error);
+                	foundTag = {};
+            	}
+            }
+        
         	// Atualização de evento existente
-        	if (this.params.event_update_status === '1' && existing_ticket !== null) {
+        	if (this.params.event_update_status === '1' && this.params.event_value === '1' && existing_ticket !== null) {
         		Logger.log(Logger.INFO, 'Event update detected. Adding interaction to ticket: ' + existing_ticket);
         		this.authenticateAPI();
         		var interaction_id = this.addInteraction(existing_ticket);
@@ -712,6 +926,23 @@ zabbix_export:
         			'ticket_id': existing_ticket,
         			'interaction_id': interaction_id,
         			'status': 'interaction_added',
+        			'tags': {
+        				'__desk_ticket_id': existing_ticket
+        			}
+        		};
+        		return this.result;
+        	}
+        
+        	// Encerramento ao adicionar atualização em evento resolvido
+        	if (this.params.event_update_status === '1' && this.params.event_value === '0' && existing_ticket !== null) {
+        		Logger.log(Logger.INFO, 'Event update detected. Adding interaction and closing ticket: ' + existing_ticket);
+        		this.authenticateAPI();
+        		var interaction_id = this.addInteractionClosing(existing_ticket);
+        
+        		this.result = {
+        			'ticket_id': existing_ticket,
+        			'interaction_id': interaction_id,
+        			'status': 'closed_ticket',
         			'tags': {
         				'__desk_ticket_id': existing_ticket
         			}
@@ -732,79 +963,86 @@ zabbix_export:
         		return this.result;
         	}
         
-        	// Criar novo ticket
-        	Logger.log(Logger.INFO, 'Creating new ticket...');
-        	this.authenticateAPI();
+        	// Criar novo ticket se novo evento
+        	if (this.params.event_update_status === '0' && existing_ticket === null) {
+        		Logger.log(Logger.INFO, 'Creating new ticket...');
+        		this.authenticateAPI();
         
-        	var severity_map = this.getSeverityMapping(this.params.event_nseverity);
-        	var description = this.buildDescription();
+        		var severity_map = this.getSeverityMapping(this.params.event_nseverity);
+        		var description = this.buildDescription();
         
-        	var ticket_data = {
-        		'TChamado': {
-        			'Solicitante': this.params.solicitante,
-        			'Email': this.params.email_solicitante,
-        			'Descricao': description,
-        			'Solicitacao': this.params.solicitacao,
-        			'TipoOcorrencia': this.params.tipo_ocorrencia,
-        			'Impacto': severity_map.impacto,
-        			'Urgencia': severity_map.urgencia,
-        			'EnviaEmail': 'S',
-        			'AutoCategoria': this.params.auto_categoria,
-        			'TransfCodGrupo': this.params.cod_grupo
+        		var ticket_data = {
+        			'TChamado': {
+        				'Solicitante': this.params.solicitante,
+        				'Email': this.params.email_solicitante,
+        				'Descricao': description,
+        				'Solicitacao': this.params.solicitacao,
+        				'TipoOcorrencia': this.params.tipo_ocorrencia,
+        				'Impacto': severity_map.impacto,
+        				'Urgencia': severity_map.urgencia,
+        				'EnviaEmail': 'S',
+        				'AutoCategoria': this.params.auto_categoria,
+        				'TransfCodGrupo': this.params.cod_grupo
+        			}
+        		};
+        
+        		Logger.log(Logger.INFO, 'Opening ticket in Desk Manager...');
+        		Logger.log(Logger.INFO, 'Ticket data: ' + JSON.stringify(ticket_data));
+        
+        		this.request.clearHeader();
+        		this.request.addHeaders('Authorization: ' + this.api_token);
+        
+        		var response = this.request.jsonRequest('PUT',  this.params.api_url + '/ChamadosSuporte', ticket_data);
+        
+        		if (this.request.getStatus() !== 200) {
+        			Logger.log(Logger.WARN, 'HTTP code: ' + this.request.getStatus());
+        			Logger.log(Logger.WARN, 'Response: ' + JSON.stringify(response));
+        
+        			if (CParamValidator.isDefined(response.erro)) {
+        				throw 'Desk Manager API error: ' + response.erro;
+        			}
+        			else {
+        				throw 'Failed to create ticket. HTTP code: ' + this.request.getStatus();
+        			}
         		}
-        	};
-        
-        	Logger.log(Logger.INFO, 'Opening ticket in Desk Manager...');
-        	Logger.log(Logger.INFO, 'Ticket data: ' + JSON.stringify(ticket_data));
-        
-        	this.request.clearHeader();
-        	this.request.addHeaders('Authorization: ' + this.api_token);
-        
-        	var response = this.request.jsonRequest('PUT', 'https://api.desk.ms/ChamadosSuporte', ticket_data);
-        
-        	if (this.request.getStatus() !== 200) {
-        		Logger.log(Logger.WARN, 'HTTP code: ' + this.request.getStatus());
-        		Logger.log(Logger.WARN, 'Response: ' + JSON.stringify(response));
         
         		if (CParamValidator.isDefined(response.erro)) {
         			throw 'Desk Manager API error: ' + response.erro;
         		}
-        		else {
-        			throw 'Failed to create ticket. HTTP code: ' + this.request.getStatus();
+        
+        		var ticket_id = null;
+        
+        		if (typeof response === 'string') {
+        			// Exemplo: "1025-000132"
+        			ticket_id = response;
         		}
-        	}
-        
-        	if (CParamValidator.isDefined(response.erro)) {
-        		throw 'Desk Manager API error: ' + response.erro;
-        	}
-        
-        	var ticket_id = null;
-        
-        	if (typeof response === 'string') {
-        		// Exemplo: "1025-000132"
-        		ticket_id = response;
-        	}
-        	else if (Array.isArray(response) && response.length > 0) {
-        		// Exemplo: ["1025-000132"]
-        		ticket_id = response[0];
-        	}
-        
-        	Logger.log(Logger.INFO, 'Ticket created successfully. ID: ' + ticket_id);
-        
-        	if (!ticket_id) {
-        		Logger.log(Logger.WARN, 'Could not determine ticket ID from Desk Manager response!');
-        		throw 'Invalid response from Desk Manager API. Expected ticket ID but got: ' + JSON.stringify(response);
-        	}
-        
-        	this.result = {
-        		'ticket_id': ticket_id,
-        		'status': 'success',
-        		'tags': {
-        			'__desk_ticket_id': ticket_id
+        		else if (Array.isArray(response) && response.length > 0) {
+        			// Exemplo: ["1025-000132"]
+        			ticket_id = response[0];
         		}
+        
+        		Logger.log(Logger.INFO, 'Ticket created successfully. ID: ' + ticket_id);
+        
+        		if (!ticket_id) {
+        			Logger.log(Logger.WARN, 'Could not determine ticket ID from Desk Manager response!');
+        			throw 'Invalid response from Desk Manager API. Expected ticket ID but got: ' + JSON.stringify(response);
+        		}
+        
+        		// Adicionar numero de chamado como mensagem
+        		// const messageAdded = this.setEventMessagesOnZabbix(ticket_id);
+        
+        		this.result = {
+        			'ticket_id': ticket_id,
+        			'status': 'success',
+        			'tags': {
+        				'__desk_ticket_id': ticket_id
+        			}
+        		};
+        
+        		return this.result;
         	};
         
-        	return this.result;
+        	return null
         };
         
         

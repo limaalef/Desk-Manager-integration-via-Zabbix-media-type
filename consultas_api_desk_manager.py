@@ -296,6 +296,15 @@ class DeskManagerAPI:
         }
         return self._fazer_requisicao("Status/lista", payload)
     
+    def listar_causa(self) -> List[Dict]:
+        """Lista causas disponíveis"""
+        payload = {
+            "Pesquisa": "",
+            "Ativo": "1",
+            "Ordem": [{"Coluna": "Nome", "Direcao": "true"}]
+        }
+        return self._fazer_requisicao("Causas/lista", payload)
+    
     def listar_operadores(self) -> List[Dict]:
         """Lista operadores disponíveis"""
         payload = {
@@ -375,7 +384,8 @@ def exibir_menu_principal():
     Colors.item("Listar grupos", index="9")
     Colors.item("Listar formas de atendimento", index="10")
     Colors.item("Listar status", index="11")
-    Colors.item("Listar operadores", index="12")
+    Colors.item("Listar causas", index="12")
+    Colors.item("Listar operadores", index="13")
     print()
     Colors.item("Sair", index="0")
     print()
@@ -645,7 +655,7 @@ def interagir_chamado_interativo(api: DeskManagerAPI):
         "Chave": chave,
         "TChamado": {
             "CodFormaAtendimento": str(forma["Chave"]),
-            "CodStatus": str(status["Chave"]),
+            "CodStatus": str(status["Sequencia"]),
             "Descricao": descricao,
             "EnviarEmail": "N",
             "EnvBase": "N",
@@ -662,6 +672,8 @@ def interagir_chamado_interativo(api: DeskManagerAPI):
     
     if grupo:
         payload["TChamado"]["CodGrupo"] = str(grupo["Chave"])
+
+    print(payload)
     
     # Exibir resumo
     print()
@@ -815,11 +827,18 @@ def main():
         elif opcao == 11:
             Colors.print_banner("CONSULTA", "Status")
             status_list = api.listar_status()
-            exibir_lista(status_list, "Status", ["Chave", "Nome"])
+            exibir_lista(status_list, "Status", ["Sequencia", "Nome"])
+            input("\nPressione ENTER para continuar...")
+        
+        # Listar causas
+        elif opcao == 12:
+            Colors.print_banner("CONSULTA", "Causa")
+            causa_list = api.listar_causa()
+            exibir_lista(causa_list, "Causa", ["Sequencia", "Nome"])
             input("\nPressione ENTER para continuar...")
         
         # Listar operadores
-        elif opcao == 12:
+        elif opcao == 13:
             Colors.print_banner("CONSULTA", "Operadores")
             operadores = api.listar_operadores()
             exibir_lista(operadores, "Operadores", ["Chave", "Nome", "Sobrenome", "Email", "GrupoPrincipal"])
