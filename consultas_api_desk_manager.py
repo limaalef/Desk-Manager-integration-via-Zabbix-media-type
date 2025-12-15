@@ -323,6 +323,24 @@ class DeskManagerAPI:
             "Ordem": [{"Coluna": "Nome", "Direcao": "true"}]
         }
         return self._fazer_requisicao("GerenteOperador/lista", payload)
+
+    def listar_autocategorias(self) -> List[Dict]:
+        """Lista operadores disponíveis"""
+        payload = {
+            "Colunas": {
+                "Chave": "on",
+                "Assunto": "on",	
+                "NomeGrupo":"on",
+                "Portal":"on",
+                "ExibirApenasGrupo":"on",
+                "FirstCall":"on",
+                "Aprovacao":"on"
+            },  
+            "Pesquisa": "Zabbix",
+            "Ativo": "S",
+            "Ordem": [{"Coluna": "Assunto", "Direcao": "true"}]
+        }
+        return self._fazer_requisicao("AutoCategorias/lista", payload)
     
     def abrir_chamado(self, dados_chamado: Dict) -> Optional[str]:
         """Abre um novo chamado"""
@@ -386,6 +404,7 @@ def exibir_menu_principal():
     Colors.item("Listar status", index="11")
     Colors.item("Listar causas", index="12")
     Colors.item("Listar operadores", index="13")
+    Colors.item("Listar auto-categorias", index="14")
     print()
     Colors.item("Sair", index="0")
     print()
@@ -842,6 +861,13 @@ def main():
             Colors.print_banner("CONSULTA", "Operadores")
             operadores = api.listar_operadores()
             exibir_lista(operadores, "Operadores", ["Chave", "Nome", "Sobrenome", "Email", "GrupoPrincipal"])
+            input("\nPressione ENTER para continuar...")
+        
+        # Listar auto-categorias
+        elif opcao == 14:
+            Colors.print_banner("CONSULTA", "Auto-categorias")
+            auto_categorias = api.listar_autocategorias()
+            exibir_lista(auto_categorias, "Auto-categorias", ["Chave", "Assunto"])
             input("\nPressione ENTER para continuar...")
         
         # Sair

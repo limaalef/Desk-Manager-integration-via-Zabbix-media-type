@@ -13,7 +13,7 @@ zabbix_export:
         - name: api_url
           value: 'https://api.desk.ms'
         - name: auto_categoria
-          value: '<INSIRA CODIGO AUTO CATEGORIA>'
+          value: '<0 = CRIAR AUTOCATEGORIA ou INSIRA CODIGO AUTO CATEGORIA>'
         - name: chave_ambiente
           value: '<INSIRA SEU TOKEN>'
         - name: chave_operador
@@ -22,6 +22,10 @@ zabbix_export:
           value: '<INSIRA CODIGO DE CAUSA>'
         - name: cod_grupo
           value: '<INSIRA CODIGO DO GRUPO>'
+        - name: cod_problematipo_auto
+          value: '<INSIRA O CODIGO DO TIPO DO PROBLEMA DA AUTOCATEGORIA>'
+        - name: cod_problema_auto
+          value: '<INSIRA O CODIGO DO PROBLEMA DA AUTOCATEGORIA>'
         - name: email_solicitante
           value: '<INSIRA EMAIL SOLICITANTE>'
         - name: event_ack_status
@@ -483,12 +487,78 @@ zabbix_export:
         	Logger.log(Logger.INFO, 'Authentication successful');
         }
         
+        // Adicione este método após DeskManager.prototype.authenticateAPI
+        DeskManager.prototype.getOrCreateAutoCategoria = function(assunto, problema, problema_tipo) {
+        	Logger.log(Logger.INFO, 'Checking if AutoCategoria exists for: ' + assunto);
+        	
+        	this.request.clearHeader();
+        	this.request.addHeaders('Authorization: ' + this.api_token);
+        	
+        	// Pesquisar AutoCategoria
+        	var search_data = {
+        		'Pesquisa': assunto,
+        		'Ativo': 'S',
+        		'Colunas': {
+        			'Chave': 'on',
+        			'Assunto': 'on'
+        		},
+                "Ordem": [{"Coluna": "Assunto", "Direcao": "true"}]
+        	};
+        	
+        	var response = this.request.jsonRequest('POST', this.params.api_url + '/AutoCategorias/lista', search_data);
+        	
+        	if (this.request.getStatus() !== 200) {
+        		throw 'Failed to search AutoCategoria. HTTP code: ' + this.request.getStatus();
+        	}
+        	
+        	// Verificar se encontrou
+        	if (response.root && response.root.length > 0) {
+        		var chave = response.root[0].Chave;
+        		Logger.log(Logger.INFO, 'AutoCategoria found with key: ' + chave);
+        		return chave.toString();
+        	}
+        	
+        	// Criar nova AutoCategoria
+        	Logger.log(Logger.INFO, 'AutoCategoria not found. Creating new one...');
+        	
+        	var create_data = {
+        		'TAutoCategoria': {
+        			'Chave': '',
+        			'Assunto': assunto,
+        			'CodGrupo': '000010',
+        			"TipoOcorrencia": "000010",
+        			"Descricao": 'Auto-categoria criada por meio da integração do Desk Manager com Zabbix.',
+        			"HideOperador": "on",
+        			"GrupoVisualiza": "on",
+        			"CodProblema": problema,
+        			"CodProblemaTipo": problema_tipo
+        		}
+        	};
+        	
+        	this.request.clearHeader();
+        	this.request.addHeaders('Authorization: ' + this.api_token);
+        	
+        	response = this.request.jsonRequest('PUT', this.params.api_url + '/AutoCategorias', create_data);
+        	
+        	if (this.request.getStatus() !== 200) {
+        		Logger.log(Logger.WARN, 'Failed to create AutoCategoria. HTTP code: ' + this.request.getStatus());
+        		if (CParamValidator.isDefined(response.erro)) {
+        			throw 'Desk Manager API error on AutoCategoria creation: ' + response.erro;
+        		}
+        		throw 'Failed to create AutoCategoria. HTTP code: ' + this.request.getStatus();
+        	}
+        	
+        	if (CParamValidator.isDefined(response.erro)) {
+        		throw 'Desk Manager API error on AutoCategoria creation: ' + response.erro;
+        	}
+        	
+        	Logger.log(Logger.INFO, 'AutoCategoria created successfully with key: ' + response);
+        	
+        	return response.toString();
+        }
+        
         DeskManager.prototype.buildDescription = function() {
         	var description = '';
-        	
-        	if (this.params.alert_subject && this.params.alert_subject !== '') {
-        		description += this.params.alert_subject + '\n';
-        	}
         	
         	if (this.params.event_severity && this.params.event_severity !== '') {
         		description += 'SEVERIDADE: ' + this.params.event_severity + '\n';
@@ -968,6 +1038,12 @@ zabbix_export:
         		Logger.log(Logger.INFO, 'Creating new ticket...');
         		this.authenticateAPI();
         
+        		var auto_categoria_chave = this.params.auto_categoria;
+        		
+        		if (auto_categoria_chave === '0') {
+        			var auto_categoria_chave = this.getOrCreateAutoCategoria(this.params.alert_subject, this.params.cod_problema_auto, this.params.cod_problematipo_auto);
+        		}
+        
         		var severity_map = this.getSeverityMapping(this.params.event_nseverity);
         		var description = this.buildDescription();
         
@@ -981,7 +1057,7 @@ zabbix_export:
         				'Impacto': severity_map.impacto,
         				'Urgencia': severity_map.urgencia,
         				'EnviaEmail': 'S',
-        				'AutoCategoria': this.params.auto_categoria,
+        				'AutoCategoria': auto_categoria_chave,
         				'TransfCodGrupo': this.params.cod_grupo
         			}
         		};
@@ -1074,6 +1150,7 @@ zabbix_export:
           operation_mode: UPDATE
           subject: '{EVENT.UPDATE.MESSAGE}'
           message: |
+            <b>[ {HOST.NAME} ] Problema: {EVENT.NAME}</b>
             <b>Atualizado por:</b> {USER.FULLNAME}
             <b>Ações:</b> {EVENT.UPDATE.ACTION}
             <b>Reconhecido:</b>  {EVENT.ACK.STATUS}
