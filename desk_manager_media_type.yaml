@@ -12,22 +12,36 @@ zabbix_export:
           value: '{ALERT.SUBJECT}'
         - name: api_url
           value: 'https://api.desk.ms'
-        - name: auto_categoria
-          value: '<0 = CRIAR AUTOCATEGORIA ou INSIRA CODIGO AUTO CATEGORIA>'
         - name: chave_ambiente
-          value: '<INSIRA SEU TOKEN>'
+          value: 1c6cf26bcec47e0550015059a45d1714fd404ad5
         - name: chave_operador
-          value: '<INSIRA SEU TOKEN>'
+          value: ee6a24f6f32c2c66ba233d18117b6019209b7339
+        - name: cod_auto_categoria
+          value: '<0 = CRIA NOVA AUTOCATEGORIA ou INSERIR CODIGO DE AUTOCATEGORIA>'
         - name: cod_causa
-          value: '<INSIRA CODIGO DE CAUSA>'
+          value: '<INSERIR CÓDIGO DA CAUSA PARA ENCERRAMENTO DO CHAMADO>'
+        - name: cod_forma_atendimento
+          value: '<INSERIR CÓDIGO DA FORMA DE ATENDIMENTO DO CHAMADO>'
         - name: cod_grupo
-          value: '<INSIRA CODIGO DO GRUPO>'
+          value: '<INSERIR CÓDIGO DO GRUPO AO QUAL O CHAMADO SERÁ DIRECIONADO>'
         - name: cod_problematipo_auto
-          value: '<INSIRA O CODIGO DO TIPO DO PROBLEMA DA AUTOCATEGORIA>'
+          value: '<INSERIR CÓDIGO DO TIPO DA AUTOCATEGORIA PARA CRIAÇÃO>'
         - name: cod_problema_auto
-          value: '<INSIRA O CODIGO DO PROBLEMA DA AUTOCATEGORIA>'
+          value: '<INSERIR CÓDIGO DA CATEGORIA DA AUTOCATEGORIA PARA CRIAÇÃO>'
+        - name: cod_solicitacao
+          value: '<INSERIR CÓDIGO DO TIPO DA SOLICITAÇÃO, DE COMO É RECEBIDA>'
+        - name: cod_solicitante
+          value: '<INSERIR CÓDIGO DO SOLICITANTE INICIAL DO CHAMADO>'
+        - name: cod_status_atendimento
+          value: '<INSERIR CÓDIGO DO STATUS EM ATENDIMENTO DO CHAMADO>'
+        - name: cod_status_pausa
+          value: '<INSERIR CÓDIGO DO STATUS DE PAUSA DO CHAMADO>'
+        - name: cod_status_resolvido
+          value: '<INSERIR CÓDIGO DO STATUS DE RESOLVIDO DO CHAMADO>'
+        - name: cod_tipo_ocorrencia
+          value: '<INSERIR CÓDIGO DO TIPO DE OCORRÊNCIA PADRÃO>'
         - name: email_solicitante
-          value: '<INSIRA EMAIL SOLICITANTE>'
+          value: '<INSERIR EMAIL DO SOLICITANTE>
         - name: event_ack_status
           value: '{EVENT.ACK.STATUS}'
         - name: event_id
@@ -48,20 +62,14 @@ zabbix_export:
           value: '{EVENT.UPDATE.STATUS}'
         - name: event_value
           value: '{EVENT.VALUE}'
-        - name: solicitacao
-          value: '<INSIRA CODIGO SOLICITACAO>'
-        - name: solicitante
-          value: '<INSIRA CODIGO SOLICITANTE>'
-        - name: tipo_ocorrencia
-          value: '<INSIRA CODIGO TIPO DE OCORRENCIA>'
         - name: trigger_id
           value: '{TRIGGER.ID}'
         - name: zabbix_key
-          value: <INSIRA CHAVE DE API ZABBIX>
+          value: <INSERIR CHAVE DE API DO ZABBIX>
         - name: zabbix_url
-          value: '{$ZABBIX.URL}'
+          value: '<INSERIR URL PUBLICA DO ZABBIX>'
         - name: zabbix_url_local
-          value: '{$ZABBIX.URL.LOCAL}'
+          value: '<INSERIR http://IP_DO_SERVIDOR DO ZABBIX>'
       attempts: '1'
       script: |
         const CLogger = function(serviceName) {
@@ -456,12 +464,12 @@ zabbix_export:
         	// Mapeia severidade do Zabbix para Impacto e Urgência do Desk Manager
         	// Disaster = 5, High = 4, Average = 3, Warning = 2, Information = 1, Not classified = 0
         	const mappings = {
-        		'5': { impacto: '000001', urgencia: '000001' }, // Disaster - Impacto 3, Urgência 3
-        		'4': { impacto: '000002', urgencia: '000001' }, // High - Impacto 2, Urgência 3
+        		'5': { impacto: '000001', urgencia: '000001' }, // Disaster - Impacto 1, Urgência 1
+        		'4': { impacto: '000002', urgencia: '000001' }, // High - Impacto 2, Urgência 1
         		'3': { impacto: '000002', urgencia: '000002' }, // Average - Impacto 2, Urgência 2
-        		'2': { impacto: '000002', urgencia: '000003' }, // Warning - Impacto 2, Urgência 1
-        		'1': { impacto: '000003', urgencia: '000003' }, // Information - Impacto 1, Urgência 1
-        		'0': { impacto: '000003', urgencia: '000003' }  // Not classified - Impacto 1, Urgência 1
+        		'2': { impacto: '000002', urgencia: '000003' }, // Warning - Impacto 2, Urgência 3
+        		'1': { impacto: '000003', urgencia: '000003' }, // Information - Impacto 3, Urgência 3
+        		'0': { impacto: '000003', urgencia: '000003' }  // Not classified - Impacto 3, Urgência 3
         	};
         	
         	return mappings[severity] || mappings['0'];
@@ -487,8 +495,7 @@ zabbix_export:
         	Logger.log(Logger.INFO, 'Authentication successful');
         }
         
-        // Adicione este método após DeskManager.prototype.authenticateAPI
-        DeskManager.prototype.getOrCreateAutoCategoria = function(assunto, problema, problema_tipo) {
+        DeskManager.prototype.getOrCreateAutoCategoria = function(assunto, problema, problema_tipo, cod_grupo, tipo_ocorrencia) {
         	Logger.log(Logger.INFO, 'Checking if AutoCategoria exists for: ' + assunto);
         	
         	this.request.clearHeader();
@@ -525,10 +532,11 @@ zabbix_export:
         		'TAutoCategoria': {
         			'Chave': '',
         			'Assunto': assunto,
-        			'CodGrupo': '000010',
-        			"TipoOcorrencia": "000010",
+        			'CodGrupo': cod_grupo,
+        			"TipoOcorrencia": tipo_ocorrencia,
         			"Descricao": 'Auto-categoria criada por meio da integração do Desk Manager com Zabbix.',
         			"HideOperador": "on",
+        			"Portal": "off",
         			"GrupoVisualiza": "on",
         			"CodProblema": problema,
         			"CodProblemaTipo": problema_tipo
@@ -557,12 +565,32 @@ zabbix_export:
         	return response.toString();
         }
         
+        DeskManager.prototype.getOperadorAndGrupo = function(description) {
+        	var cod_operador = '';
+        	var cod_grupo = this.params.cod_grupo;
+        	
+        	if (this.params.alert_sendto && this.params.alert_sendto.trim() !== '') {
+        		var descLower = description.toLowerCase();
+        		var usuarios = JSON.parse(this.params.alert_sendto);
+        		
+        		for (var usuario in usuarios) {
+        			if (descLower.includes(usuario)) {
+        				cod_operador = usuarios[usuario].codigo;
+        				cod_grupo = usuarios[usuario].grupo;
+        				Logger.log(Logger.INFO, 'CodOperador set to: ' + cod_operador);
+        				break;
+        			}
+        		}
+        	}
+        	
+        	return {
+        		cod_operador: cod_operador,
+        		cod_grupo: cod_grupo
+        	};
+        }
+        
         DeskManager.prototype.buildDescription = function() {
         	var description = '';
-        	
-        	if (this.params.event_severity && this.params.event_severity !== '') {
-        		description += 'SEVERIDADE: ' + this.params.event_severity + '\n';
-        	}
         	
         	if (this.params.alert_message && this.params.alert_message !== '') {
         		description += '\n<b>TRIGGER INFORMATION</b>\n' + this.params.alert_message + '\n';
@@ -601,29 +629,13 @@ zabbix_export:
         	Logger.log(Logger.INFO, 'Adding interaction to ticket: ' + ticket_id);
         	
         	var interaction_description = this.buildInteractionDescription();
-        	var descLower = interaction_description.toLowerCase();
-        
-        	// Procura o nome do operador e devolve o código respectivo
-        	var cod_operador = '';
-        	var cod_grupo = this.params.cod_grupo;
-        
-        	if (this.params.alert_sendto && this.params.alert_sendto.trim() !== '') {
-        		var usuarios = JSON.parse(this.params.alert_sendto);
-        
-        		for (var usuario in usuarios) {
-        			if (descLower.includes(usuario)) {
-        				cod_operador = usuarios[usuario].codigo;
-        				cod_grupo = usuarios[usuario].grupo;
-        				Logger.log(Logger.INFO, 'CodOperador set to: ' + cod_operador);
-        			}
-        		}
-        	}
+        	var operador_info = this.getOperadorAndGrupo(interaction_description);
         
         	// Acknowledge = Pausa, senão em atendimento
         	if (this.params.event_ack_status === 'No') {
-        		cod_status = '000006'
+        		cod_status = this.params.cod_status_atendimento
         	} else {
-        		cod_status = '000020'
+        		cod_status = this.params.cod_status_pausa
         	}
         
         	// Gerar data e hora automaticamente
@@ -649,7 +661,7 @@ zabbix_export:
         	var interaction_data = {
         		'Chave': ticket_id,
         		'TChamado': {
-        			'CodFormaAtendimento': '000004',
+        			'CodFormaAtendimento': this.params.cod_forma_atendimento,
         			'CodStatus': cod_status,
         			'Descricao': interaction_description,
         			'EnviarEmail': 'N',
@@ -659,8 +671,8 @@ zabbix_export:
         			'HoraFinal': formatTime(horaFinal),
         			'PrimeiroAtendimento': 'N',
         			'SegundoAtendimento': 'N',
-        			"CodGrupo": cod_grupo,
-        			'CodOperador': cod_operador
+        			"CodGrupo": operador_info.cod_grupo,
+        			'CodOperador': operador_info.cod_operador
         		}
         	};
         	
@@ -699,26 +711,10 @@ zabbix_export:
         	Logger.log(Logger.INFO, 'Adding interaction to ticket: ' + ticket_id);
         	
         	var interaction_description = this.buildInteractionDescription();
-        	var descLower = interaction_description.toLowerCase();
-        
-        	// Procura o nome do operador e devolve o código respectivo
-        	var cod_operador = '';
-        	var cod_grupo = this.params.cod_grupo;
-        
-        	if (this.params.alert_sendto && this.params.alert_sendto.trim() !== '') {
-        		var usuarios = JSON.parse(this.params.alert_sendto);
-        
-        		for (var usuario in usuarios) {
-        			if (descLower.includes(usuario)) {
-        				cod_operador = usuarios[usuario].codigo;
-        				cod_grupo = usuarios[usuario].grupo;
-        				Logger.log(Logger.INFO, 'CodOperador set to: ' + cod_operador);
-        			}
-        		}
-        	}
+        	var operador_info = this.getOperadorAndGrupo(interaction_description);
         
         	// Resolvido
-        	cod_status = '000002';
+        	cod_status = this.params.cod_status_resolvido;
         
         	// Gerar data e hora automaticamente
         	var now = new Date();
@@ -743,7 +739,7 @@ zabbix_export:
         	var interaction_data = {
         		'Chave': ticket_id,
         		'TChamado': {
-        			'CodFormaAtendimento': '000004',
+        			'CodFormaAtendimento': this.params.cod_forma_atendimento,
         			'CodStatus': cod_status,
         			'CodCausa': this.params.cod_causa,
         			'Descricao': interaction_description,
@@ -754,8 +750,8 @@ zabbix_export:
         			'HoraFinal': formatTime(horaFinal),
         			'PrimeiroAtendimento': 'S',
         			'SegundoAtendimento': 'S',
-        			"CodGrupo": cod_grupo,
-        			'CodOperador': cod_operador
+        			"CodGrupo": operador_info.cod_grupo,
+        			'CodOperador': operador_info.cod_operador
         		}
         	};
         	
@@ -799,7 +795,7 @@ zabbix_export:
         }
         
         DeskManager.prototype.setEventMessagesOnZabbix = function(ticketid) {
-        	Logger.log(Logger.INFO, 'Consultando mensagens do evento no Zabbix...');
+        	Logger.log(Logger.INFO, 'Checking event messages in Zabbix...');
         
         	var zabbix_request = new HttpRequest();
         
@@ -872,7 +868,7 @@ zabbix_export:
         };
         
         DeskManager.prototype.findTagInMessages = function(messages) {
-        	Logger.log(Logger.INFO, 'Procurando padrão NOMEDATAG=NUMERODATAG nas mensagens...');
+        	Logger.log(Logger.INFO, 'Looking for the pattern NOMEDATAG=NUMERODATAG in messages...');
         	for (var i = 0; i < messages.length; i++) {
         		var msg = messages[i].message || '';
         		var match = msg.match(/([A-Za-z0-9_]+)=([0-9\-]+)/);
@@ -881,22 +877,30 @@ zabbix_export:
         			return { tagName: match[1], tagValue: match[2] };
         		}
         	}
-        	Logger.log(Logger.INFO, 'Nenhuma tag encontrada nas mensagens.');
+        	Logger.log(Logger.INFO, 'No tags found in the messages.');
         	return null;
         };
         
         DeskManager.prototype.onCheckParams = function() {
         	CParamValidator.validate(
         		{
+        			alert_message: {type: 'string'},
+        			alert_subject: {type: 'string'},
         			chave_operador: {type: 'string'},
         			chave_ambiente: {type: 'string'},
-        			solicitante: {type: 'string'},
-        			email_solicitante: {type: 'string'},
-        			solicitacao: {type: 'string'},
-        			tipo_ocorrencia: {type: 'string'},
-        			auto_categoria: {type: 'string'},
+        			cod_auto_categoria: {type: 'string'},
+        			cod_causa: {type: 'string'},
+        			cod_forma_atendimento: {type: 'string'},
         			cod_grupo: {type: 'string'},
-        			alert_message: {type: 'string'}
+        			cod_problematipo_auto: {type: 'string'},
+        			cod_problema_auto: {type: 'string'},
+        			cod_status_atendimento: {type: 'string'},
+        			cod_status_pausa: {type: 'string'},
+        			cod_status_resolvido: {type: 'string'},
+        			cod_solicitacao: {type: 'string'},
+        			cod_solicitante: {type: 'string'},
+        			cod_tipo_ocorrencia: {type: 'string'},
+        			email_solicitante: {type: 'string'}
         		},
         		this.params
         	);
@@ -1038,10 +1042,16 @@ zabbix_export:
         		Logger.log(Logger.INFO, 'Creating new ticket...');
         		this.authenticateAPI();
         
-        		var auto_categoria_chave = this.params.auto_categoria;
+        		var auto_categoria_chave = this.params.cod_auto_categoria;
         		
         		if (auto_categoria_chave === '0') {
-        			var auto_categoria_chave = this.getOrCreateAutoCategoria(this.params.alert_subject, this.params.cod_problema_auto, this.params.cod_problematipo_auto);
+        			var auto_categoria_chave = this.getOrCreateAutoCategoria(
+        				this.params.alert_subject,
+        				this.params.cod_problema_auto,
+        				this.params.cod_problematipo_auto,
+        				this.params.cod_grupo,
+        				this.params.cod_tipo_ocorrencia
+        			);
         		}
         
         		var severity_map = this.getSeverityMapping(this.params.event_nseverity);
@@ -1049,16 +1059,17 @@ zabbix_export:
         
         		var ticket_data = {
         			'TChamado': {
-        				'Solicitante': this.params.solicitante,
+        				'Solicitante': this.params.cod_solicitante,
         				'Email': this.params.email_solicitante,
-        				'Descricao': description,
-        				'Solicitacao': this.params.solicitacao,
-        				'TipoOcorrencia': this.params.tipo_ocorrencia,
+        				'AutoCategoria': auto_categoria_chave,
+        				'Assunto': this.params.alert_subject,
+        				'Solicitacao': this.params.cod_solicitacao,
+        				'TipoOcorrencia': this.params.cod_tipo_ocorrencia,
         				'Impacto': severity_map.impacto,
         				'Urgencia': severity_map.urgencia,
-        				'EnviaEmail': 'S',
-        				'AutoCategoria': auto_categoria_chave,
-        				'TransfCodGrupo': this.params.cod_grupo
+        				'Descricao': description,
+        				'TransfCodGrupo': this.params.cod_grupo,
+        				'EnviaEmail': 'S'
         			}
         		};
         
